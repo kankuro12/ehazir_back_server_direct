@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # CONFIGURATION
-SERVICE_NAME="ehazir_back_server"
+SERVICE_NAME="ehazir_back_server_direct"
 USER_NAME="$USER"
 CURRENT_DIR=$(pwd)
 WORK_DIR="$CURRENT_DIR"
