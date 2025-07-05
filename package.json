@@ -1,0 +1,16 @@
+{
+  "name": "ehajir_back_server_direct",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.8.4",
+    "dotenv": "^17.0.1",
+    "sqlite3": "^5.1.7"
+  }
+}
