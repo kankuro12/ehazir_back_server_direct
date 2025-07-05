@@ -16,3 +16,5 @@ dist/
 *.db-shm
 *.db-wal
 
+lastdata.txt
+rfid.txt
