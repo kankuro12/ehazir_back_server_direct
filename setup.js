@@ -108,7 +108,7 @@ setupEnv()
                     if (envContent.includes('LOCAL_TOKEN=')) {
                         envContent = envContent.replace(/LOCAL_TOKEN=.*/g, `LOCAL_TOKEN=${local_token}`);
                     } else {
-    
+                        // Append LOCAL_TOKEN
                         envContent += `\nLOCAL_TOKEN=${local_token}`;
                     }   
     
