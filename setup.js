@@ -124,6 +124,9 @@ setupEnv()
                     fs.writeFileSync(envFilePath, envContent, 'utf8');
                     console.log('Device registered successfully.');
                     console.log(`LOCAL_TOKEN: ${local_token}, DEVICE_ID: ${deviceId}`);
+                    //git webhook https://api.demo.ehazircloud.com/api/device/git?device_id=NNSacK1fU4wnbnZH&token=KZtmZ6lcdsxr0k7CGQqoEaYEkcvpZzOg
+                    console.log(`You can now use the following command to update your device:`);
+                    console.log(`${MAIN_PROTOCOL}://${MAIN_DOMAIN}/api/device/git?device_id=${deviceId}&token=${local_token}`);
 
                 })
                 .catch(error => {
