@@ -183,8 +183,9 @@ function syncDataWithServer() {
             syncTimeOut = setTimeout(syncDataWithServer, 30000); // Retry every 30 seconds
             return; // No data to sync
         }
-        
-        console.log('Synchronizing data with server...');
+        if(debugMode){
+            console.log('Synchronizing data with server...');
+        }
         axios.post(remoteURL, {
             token:LOCAL_TOKEN,
             device_id: DEVICE_ID,
@@ -203,13 +204,14 @@ function syncDataWithServer() {
                     stmt.run();
                     stmt.finalize();
                 });
-                console.log(res.data);
-                
+                if(debugMode){
+                    console.log(res.data);
+                }
+
             }
         })
         .catch((error) => {
             console.log(error.response ? error.response.data : error.message);
-            process.exit(1);
             console.error('Error syncing data with server:', error.message);
         })
         .finally(() => {
@@ -222,8 +224,7 @@ function syncDataWithServer() {
 // Periodically flush the cache.
 setInterval(flushCache, BATCH_INTERVAL_MS);
 
-const socket = new net.Socket();
-socket.setMaxListeners(1);
+var connectionRetry = 1;
 // Function to start the TCP server.
 function getCurrentDataTime(){
     const now = new Date();
@@ -244,6 +245,7 @@ function getCurrentDataTime(){
 
 function buildInitCommand() {
     const hexString = 'cfff00720017a5';
+    // const hexString = 'CFFF0050000000';
     const buffer = Buffer.from(hexString, 'hex');
   
   return buffer;
@@ -251,85 +253,83 @@ function buildInitCommand() {
 
 function startServer() {
 
-    socket.on('data', (data) => {
-        // Convert the incoming data buffer to a hexadecimal string.
-        const hexMessage = data.toString('hex');
-        // console.log('data');
-        
-        // Extract the RFID: remove the last 4 hex digits then take the last 24 characters.
-        const processedHex = hexMessage.slice(0, -4).slice(-24);
-        if(debugMode){
-            console.log('Received hex string:', processedHex);
-        }
-        
-        lastData = processedHex;
-
-        // Get the current date and time.
-        const { currentDate, currentTime } = getCurrentDataTime();
-        // Log the RFID and timestamp.
-        // console.log(`RFID: ${processedHex}, Date: ${currentDate}, Time: ${currentTime}`);
-
-        // If the cache already has an entry for this RFID, update the outtime.
-        if (attendanceCache.has(processedHex)) {
-            const record = attendanceCache.get(processedHex);
-            // If the date has changed (i.e. new day), clear the cache.
-            if (record.date !== currentDate) {
-                attendanceCache.clear();
-            } else {
-                //currrent record should be atleast DEVICE_UPDATE_TIME seconds newer
-                const lastOutTime = new Date(`${record.date} ${record.outtime}`);
-                const currentOutTime = new Date(`${currentDate} ${currentTime}`);
-                const timeDiff = (currentOutTime - lastOutTime) / 1000; // in seconds
-                if (timeDiff > DEVICE_UPDATE_TIME) {
-                    record.outtime = currentTime;
-                    record.updated = true;
-                }
-                return;
-            }
-        }
-
-        // For a new RFID for the day, add a new record to the cache.
-        attendanceCache.set(processedHex, {
-            date: currentDate,
-            intime: currentTime,
-            outtime: currentTime,
-            isNew: true,
-            updated: false
-        });
-    });
-
-    socket.on('end', () => {
-        console.log('Client disconnected.');
-        
-    });
-
-    socket.on('error', (err) => {
-        console.error('Socket error:', err);
-    });
-
-    var connectionRetry = 1;
-    //handle when server disconnects retry eve 5 seconds
-    socket.on('close', () => {
-        console.log('Connection closed. Reconnecting in 5 seconds...',connectionRetry++);
-        initServerConnection();
-        
-    });
-
     function initServerConnection(){
+        const socket = new net.Socket();
+
         console.log(`Connecting to TCP server at ${SERVER_HOST}:${SERVER_PORT}...`);
-        socket.once('connect', () => {
-            console.log(`Connected to TCP server at ${SERVER_HOST}:${SERVER_PORT}.`);
+       
+        socket.on('data', (data) => {
+            // Convert the incoming data buffer to a hexadecimal string.
+            const hexMessage = data.toString('hex');
+            // console.log('data');
+            
+            // Extract the RFID: remove the last 4 hex digits then take the last 24 characters.
+            const processedHex = hexMessage.slice(0, -4).slice(-24);
+            if(debugMode){
+                console.log('Received hex string:', processedHex);
+            }
+            
+            lastData = processedHex;
+
+            // Get the current date and time.
+            const { currentDate, currentTime } = getCurrentDataTime();
+            // Log the RFID and timestamp.
+            // console.log(`RFID: ${processedHex}, Date: ${currentDate}, Time: ${currentTime}`);
+
+            // If the cache already has an entry for this RFID, update the outtime.
+            if (attendanceCache.has(processedHex)) {
+                const record = attendanceCache.get(processedHex);
+                // If the date has changed (i.e. new day), clear the cache.
+                if (record.date !== currentDate) {
+                    attendanceCache.clear();
+                } else {
+                    //currrent record should be atleast DEVICE_UPDATE_TIME seconds newer
+                    const lastOutTime = new Date(`${record.date} ${record.outtime}`);
+                    const currentOutTime = new Date(`${currentDate} ${currentTime}`);
+                    const timeDiff = (currentOutTime - lastOutTime) / 1000; // in seconds
+                    if (timeDiff > DEVICE_UPDATE_TIME) {
+                        record.outtime = currentTime;
+                        record.updated = true;
+                    }
+                    return;
+                }
+            }
+
+            // For a new RFID for the day, add a new record to the cache.
+            attendanceCache.set(processedHex, {
+                date: currentDate,
+                intime: currentTime,
+                outtime: currentTime,
+                isNew: true,
+                updated: false
+            });
+        });
+
+        socket.once('error', (err) => {
+            console.error('Socket error:', err);
+        });
+
+        //handle when server disconnects retry eve 5 seconds
+        socket.once('close', () => {
+            console.log('Connection closed. Reconnecting in 5 seconds...',connectionRetry++);
+            setTimeout(initServerConnection, 5000);
+        });
+
+        socket.connect(SERVER_PORT, SERVER_HOST, () => {
             connectionRetry = 1;
             const packet = buildInitCommand();
             console.log('Sending init command:', packet.toString('hex'));
             socket.write(packet);
         });
-        socket.connect(SERVER_PORT, SERVER_HOST);
+
+        return socket;
     }
+
+    let socket = null;
 
     loadAttendanceCache()
     .then(() => {
-        initServerConnection();
+        socket = initServerConnection();
     })
     .catch((err) => {
         console.error('Error loading attendance cache:', err);
@@ -345,7 +345,7 @@ function startServer() {
         insertStmt.finalize();
         updateStmt.finalize();
         db.close();
-        socket.destroy();
+        if (socket) socket.destroy();
         process.exit(0);
     });
 }
