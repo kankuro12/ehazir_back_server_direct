@@ -18,6 +18,11 @@ const LOCAL_TOKEN = process.env.LOCAL_TOKEN || 'your_local_token';
 const DEVICE_ID = process.env.DEVICE_ID || 'your_device_id';
 const DEVICE_UPDATE_TIME = process.env.DEVICE_UPDATE_TIME || 30; // in seconds
  
+// const debugMode = process.argv.includes('--debug');
+
+// if (!debugMode) {
+//     console.log = function () { };
+// }
 
 
 // Open (or create) the database.
@@ -235,6 +240,12 @@ function getCurrentDataTime(){
     return { currentDate: formattedDate, currentTime: formattedTime };
 }
 
+function buildInitCommand() {
+    const hexString = 'cfff00720017a5';
+    const buffer = Buffer.from(hexString, 'hex');
+  
+  return buffer;
+}
 
 function startServer() {
 
@@ -304,6 +315,9 @@ function startServer() {
         socket.once('connect', () => {
             console.log(`Connected to TCP server at ${SERVER_HOST}:${SERVER_PORT}.`);
             connectionRetry = 1;
+            const packet = buildInitCommand();
+            console.log('Sending init command:', packet.toString('hex'));
+            socket.write(packet);
         });
         socket.connect(SERVER_PORT, SERVER_HOST);
     }
