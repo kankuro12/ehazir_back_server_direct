@@ -18,7 +18,7 @@ const LOCAL_TOKEN = process.env.LOCAL_TOKEN || 'your_local_token';
 const DEVICE_ID = process.env.DEVICE_ID || 'your_device_id';
 const DEVICE_UPDATE_TIME = process.env.DEVICE_UPDATE_TIME || 30; // in seconds
  
-// const debugMode = process.argv.includes('--debug');
+const debugMode = process.argv.includes('--debug');
 
 // if (!debugMode) {
 //     console.log = function () { };
@@ -145,8 +145,10 @@ function flushCache() {
             syncDataWithServer();
         }
     });
+    if(size>0 || debugMode){
+        console.log(`Flushed ${size} records to the database.`);
+    }
 
-    console.log(`Flushed ${size} records to the database.`);
     
 }
 
@@ -256,7 +258,10 @@ function startServer() {
         
         // Extract the RFID: remove the last 4 hex digits then take the last 24 characters.
         const processedHex = hexMessage.slice(0, -4).slice(-24);
-        // console.log('Received hex string:', processedHex);
+        if(debugMode){
+            console.log('Received hex string:', processedHex);
+        }
+        
         lastData = processedHex;
 
         // Get the current date and time.
