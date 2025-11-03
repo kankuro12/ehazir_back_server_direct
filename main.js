@@ -251,10 +251,16 @@ function buildInitCommand() {
   return buffer;
 }
 
+let socket = null;
+
 function startServer() {
 
     function initServerConnection(){
-        const socket = new net.Socket();
+        socket = new net.Socket();
+        socket.setKeepAlive(true);
+        socket.setTimeout(60000); // 60 second timeout
+
+
 
         console.log(`Connecting to TCP server at ${SERVER_HOST}:${SERVER_PORT}...`);
        
@@ -305,18 +311,29 @@ function startServer() {
             });
         });
 
-        socket.once('error', (err) => {
-            console.error('Socket error:', err);
+        socket.on('timeout', () => {
+            console.log('Connection timeout');
+            socket.destroy();
+        });
+
+        socket.on('error', (err) => {
+            console.error('Socket error:', err.message);
+            // Don't reconnect here - let close event handle it
         });
 
         //handle when server disconnects retry eve 5 seconds
-        socket.once('close', () => {
-            console.log('Connection closed. Reconnecting in 5 seconds...',connectionRetry++);
+        socket.once('close', (hadError) => {
+            if (hadError) {
+                console.log('Connection closed due to error. Reconnecting in 5 seconds...', connectionRetry++);
+            } else {
+                console.log('Connection closed normally. Reconnecting in 5 seconds...', connectionRetry++);
+            }
             setTimeout(initServerConnection, 5000);
         });
 
         socket.connect(SERVER_PORT, SERVER_HOST, () => {
             connectionRetry = 1;
+            socket.setTimeout(10000); // 10 second timeout
             const packet = buildInitCommand();
             console.log('Sending init command:', packet.toString('hex'));
             socket.write(packet);
@@ -325,11 +342,11 @@ function startServer() {
         return socket;
     }
 
-    let socket = null;
+   
 
     loadAttendanceCache()
     .then(() => {
-        socket = initServerConnection();
+        initServerConnection();
     })
     .catch((err) => {
         console.error('Error loading attendance cache:', err);
