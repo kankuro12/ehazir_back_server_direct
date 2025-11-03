@@ -258,7 +258,7 @@ function startServer() {
     function initServerConnection(){
         socket = new net.Socket();
         socket.setKeepAlive(true);
-        socket.setTimeout(60000); // 60 second timeout
+        // socket.setTimeout(60000); // 60 second timeout
 
 
 
@@ -311,10 +311,10 @@ function startServer() {
             });
         });
 
-        socket.on('timeout', () => {
-            console.log('Connection timeout');
-            socket.destroy();
-        });
+        // socket.on('timeout', () => {
+        //     console.log('Connection timeout');
+        //     socket.destroy();
+        // });
 
         socket.on('error', (err) => {
             console.error('Socket error:', err.message);
@@ -333,7 +333,7 @@ function startServer() {
 
         socket.connect(SERVER_PORT, SERVER_HOST, () => {
             connectionRetry = 1;
-            socket.setTimeout(10000); // 10 second timeout
+            // socket.setTimeout(10000); // 10 second timeout
             const packet = buildInitCommand();
             console.log('Sending init command:', packet.toString('hex'));
             socket.write(packet);
