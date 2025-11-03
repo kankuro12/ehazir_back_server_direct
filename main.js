@@ -18,7 +18,7 @@ const LOCAL_TOKEN = process.env.LOCAL_TOKEN || 'your_local_token';
 const DEVICE_ID = process.env.DEVICE_ID || 'your_device_id';
 const DEVICE_UPDATE_TIME = process.env.DEVICE_UPDATE_TIME || 30; // in seconds
  
-const debugMode = process.argv.includes('--debug');
+const debugMode = true;
 
 // if (!debugMode) {
 //     console.log = function () { };

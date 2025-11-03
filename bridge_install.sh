@@ -27,6 +27,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+User=root
 ExecStart=$BRIDGE_SCRIPT
 ExecStop=/usr/sbin/iptables -t nat -F POSTROUTING
 ExecStop=/usr/sbin/iptables -F FORWARD
