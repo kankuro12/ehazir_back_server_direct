@@ -252,6 +252,7 @@ function buildInitCommand() {
 }
 
 let socket = null;
+let fromRetry = false;
 
 function startServer() {
 
@@ -311,10 +312,11 @@ function startServer() {
             });
         });
 
-        // socket.on('timeout', () => {
-        //     console.log('Connection timeout');
-        //     socket.destroy();
-        // });
+        socket.on('timeout', () => {
+            console.log('Connection timeout');
+            fromRetry = true;
+            socket.destroy();
+        });
 
         socket.on('error', (err) => {
             console.error('Socket error:', err.message);
@@ -322,18 +324,19 @@ function startServer() {
         });
 
         //handle when server disconnects retry eve 5 seconds
-        socket.once('close', (hadError) => {
+        socket.on('close', (hadError) => {
             if (hadError) {
                 console.log('Connection closed due to error. Reconnecting in 5 seconds...', connectionRetry++);
             } else {
                 console.log('Connection closed normally. Reconnecting in 5 seconds...', connectionRetry++);
             }
-            setTimeout(initServerConnection, 5000);
+            setTimeout(initServerConnection, fromRetry?1:5000);
         });
 
         socket.connect(SERVER_PORT, SERVER_HOST, () => {
             connectionRetry = 1;
-            // socket.setTimeout(10000); // 10 second timeout
+            socket.setTimeout(10000); // 10 second timeout
+            fromRetry = false;
             const packet = buildInitCommand();
             console.log('Sending init command:', packet.toString('hex'));
             socket.write(packet);
