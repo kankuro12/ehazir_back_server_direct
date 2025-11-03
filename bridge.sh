@@ -29,10 +29,6 @@ iptables -t nat -A POSTROUTING -o $WIFI_IF -j MASQUERADE
 iptables -A FORWARD -i $ETH_IF -o $WIFI_IF -j ACCEPT
 iptables -A FORWARD -i $WIFI_IF -o $ETH_IF -m state --state RELATED,ESTABLISHED -j ACCEPT
 
-echo "📦 Installing isc-dhcp-server if not present..."
-apt-get update
-apt-get install -y isc-dhcp-server
-
 echo "📝 Configuring DHCP server..."
 cat > /etc/dhcp/dhcpd.conf <<EOF
 subnet $SUBNET netmask 255.255.255.0 {
