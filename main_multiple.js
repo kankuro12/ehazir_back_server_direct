@@ -275,7 +275,7 @@ function startServer() {
             // Extract the RFID: remove the last 4 hex digits then take the last 24 characters.
             const processedHex = hexMessage.slice(0, -4).slice(-24);
             if(debugMode){
-                console.log('Received hex string:', processedHex);
+                console.log('Received hex string:',SERVER_HOST, processedHex);
             }
             
             lastData = processedHex;
