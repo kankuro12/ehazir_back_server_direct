@@ -10,8 +10,7 @@ const { default: axios } = require('axios');
 
 
 const SERVER_PORT = process.env.SERVER_PORT || 5000;
-const SERVER_HOSTS = process.env.SERVER_HOST.split(',') || ['localhost'];
-
+const SERVER_HOST = process.env.SERVER_HOST ;
 
 const MAIN_DOMAIN = process.env.MAIN_DOMAIN || 'localhost:8000';
 const MAIN_PROTOCOL = process.env.MAIN_PROTOCOL || 'http';
@@ -252,18 +251,17 @@ function buildInitCommand() {
   return buffer;
 }
 
-let sockets = {}; // Store sockets by host
-let fromRetry = {}; // Track retry status per host
+let socket = null;
+let fromRetry = false;
 
 function startServer() {
 
-    function initServerConnection(SERVER_HOST){
-        const socket = new net.Socket();
+    function initServerConnection(){
+        socket = new net.Socket();
         socket.setKeepAlive(true);
         // socket.setTimeout(60000); // 60 second timeout
 
-        // Store socket reference
-        sockets[SERVER_HOST] = socket;
+
 
         console.log(`Connecting to TCP server at ${SERVER_HOST}:${SERVER_PORT}...`);
        
@@ -275,7 +273,7 @@ function startServer() {
             // Extract the RFID: remove the last 4 hex digits then take the last 24 characters.
             const processedHex = hexMessage.slice(0, -4).slice(-24);
             if(debugMode){
-                console.log('Received hex string:',SERVER_HOST, processedHex);
+                console.log('Received hex string:', processedHex);
             }
             
             lastData = processedHex;
@@ -315,31 +313,32 @@ function startServer() {
         });
 
         socket.on('timeout', () => {
-            console.log(`Connection timeout for ${SERVER_HOST}`);
-            fromRetry[SERVER_HOST] = true;
+            console.log('Connection timeout');
+            fromRetry = true;
             socket.destroy();
         });
 
         socket.on('error', (err) => {
-            console.error(`Socket error for ${SERVER_HOST}:`, err.message);
+            console.error('Socket error:', err.message);
             // Don't reconnect here - let close event handle it
         });
 
-        //handle when server disconnects retry every 5 seconds
+        //handle when server disconnects retry eve 5 seconds
         socket.on('close', (hadError) => {
             if (hadError) {
-                console.log(`Connection closed due to error for ${SERVER_HOST}. Reconnecting in 5 seconds...`);
+                console.log('Connection closed due to error. Reconnecting in 5 seconds...', connectionRetry++);
             } else {
-                console.log(`Connection closed normally for ${SERVER_HOST}. Reconnecting in 5 seconds...`);
+                console.log('Connection closed normally. Reconnecting in 5 seconds...', connectionRetry++);
             }
-            setTimeout(() => initServerConnection(SERVER_HOST), fromRetry[SERVER_HOST] ? 1 : 5000);
+            setTimeout(initServerConnection, fromRetry?1:5000);
         });
 
         socket.connect(SERVER_PORT, SERVER_HOST, () => {
+            connectionRetry = 1;
             socket.setTimeout(10000); // 10 second timeout
-            fromRetry[SERVER_HOST] = false;
+            fromRetry = false;
             const packet = buildInitCommand();
-            console.log(`Sending init command to ${SERVER_HOST}:`, packet.toString('hex'));
+            console.log('Sending init command:', packet.toString('hex'));
             socket.write(packet);
         });
 
@@ -350,14 +349,7 @@ function startServer() {
 
     loadAttendanceCache()
     .then(() => {
-        // Connect to all servers in SERVER_HOSTS
-        SERVER_HOSTS.forEach((host) => {
-            const trimmedHost = host.trim();
-            if (trimmedHost) {
-                console.log(`Initializing connection to ${trimmedHost}`);
-                initServerConnection(trimmedHost);
-            }
-        });
+        initServerConnection();
     })
     .catch((err) => {
         console.error('Error loading attendance cache:', err);
@@ -373,10 +365,7 @@ function startServer() {
         insertStmt.finalize();
         updateStmt.finalize();
         db.close();
-        // Destroy all active sockets
-        Object.values(sockets).forEach(socket => {
-            if (socket) socket.destroy();
-        });
+        if (socket) socket.destroy();
         process.exit(0);
     });
 }
