@@ -37,6 +37,15 @@ EOF
   echo "✅ Service installed and enabled. Use start/restart to begin."
 }
 
+function uninstall_service() {
+  echo "🗑️  Uninstalling $SERVICE_NAME..."
+  sudo systemctl stop $SERVICE_NAME 2>/dev/null
+  sudo systemctl disable $SERVICE_NAME 2>/dev/null
+  sudo rm -f $SERVICE_PATH
+  sudo systemctl daemon-reload
+  echo "✅ Service uninstalled successfully."
+}
+
 function start_service() {
   echo "🚀 Starting $SERVICE_NAME..."
   sudo systemctl start $SERVICE_NAME
@@ -58,12 +67,13 @@ function view_logs() {
 }
 
 function usage() {
-  echo "Usage: $0 [install|start|stop|restart|logs]"
+  echo "Usage: $0 [install|uninstall|start|stop|restart|logs]"
 }
 
 # Main logic
 case "$1" in
   install) install_service ;;
+  uninstall) uninstall_service ;;
   start) start_service ;;
   stop) stop_service ;;
   restart) restart_service ;;
