@@ -1,6 +1,6 @@
 const http = require("http");
 const express = require("express");
-const sqlite3 = require('sqlite3').verbose();
+const axios = require("axios");
 
 const app = express();
 const host = "0.0.0.0";
@@ -44,6 +44,7 @@ app.all("/iclock/cdata", (req, res) => {
 
     const records = parseAttendance(req.rawBody);
     console.log("✅ PARSED RECORDS:", records);
+    sendToBackend(records);
 
     res.send("OK");
 });
@@ -60,17 +61,31 @@ function parseAttendance(raw) {
             return {
                 userId: cols[0],        // Column 1: User PIN/ID
                 punchTime: cols[1],     // Column 2: Punch DateTime
-                verifyMode: cols[2],    // Column 3: Verify Mode
-                inOutMode: cols[3],     // Column 4: In/Out Mode (1=in, 2=out)
-                workCode: cols[4]       // Column 5: Work Code
+                verifyMode: cols[2],     // Column 4: In/Out Mode (1=in, 2=out)
+                inOutMode: cols[3],    // Column 3: Verify Mode 
             };
         });
 }
 
 
-function sendToBackend(data){
+async function sendToBackend(data) {
+    if (!data.length) return;
 
+    console.log("🚀 Sending data to backend:", data);
 
+    try {
+        const response = await axios.post(
+            "http://localhost:8000/api/staff/attendance",
+            { records: data },
+            { timeout: 5000 }
+        );
+
+        console.log("✅ Data sent successfully:", response.data);
+    } catch (error) {
+        console.error("❌ Backend error:",
+            error.response?.data || error.message
+        );
+    }
 }
 
 
