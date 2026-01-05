@@ -61,8 +61,8 @@ function parseAttendance(raw) {
             return {
                 userId: cols[0],        // Column 1: User PIN/ID
                 punchTime: cols[1],     // Column 2: Punch DateTime
-                verifyMode: cols[2],     // Column 4: In/Out Mode (1=in, 2=out)
-                inOutMode: cols[3],    // Column 3: Verify Mode 
+                inOutMode: cols[2],    // Column 3: check in checkout
+                verifyMode: cols[3],     // fingerprint/ card attendance
             };
         });
 }
