@@ -122,10 +122,12 @@ async function flushAttendanceCache() {
 
 setInterval(flushAttendanceCache, BATCH_INTERVAL_MS);
 
-function startAttendanceServer() {
-    http.createServer(app).listen(port, host, () => {
-        console.log(`🟢 ZKTeco HTTP ADMS Server running on ${port}`);
+function startAttendanceServer(p,h) {
+    http.createServer(app).listen(p, h, () => {
+        console.log(`🟢 ZKTeco HTTP ADMS Server running on port: ${p} and host: ${h}`);
     });
 }
 
-startAttendanceServer();
+
+module.exports = {startAttendanceServer};
+

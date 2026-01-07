@@ -19,7 +19,7 @@ const LOCAL_TOKEN = process.env.LOCAL_TOKEN || 'your_local_token';
 const DEVICE_ID = process.env.DEVICE_ID || 'your_device_id';
 const DEVICE_UPDATE_TIME = process.env.DEVICE_UPDATE_TIME || 30; // in seconds
 const HOST= process.env.HOST;
-const HTTP_PORT= process.env.HTTP_PORT|| 30; // in seconds
+const HTTP_PORT= process.env.HTTP_PORT; // in seconds
  
 
 const debugMode = true;
@@ -261,7 +261,10 @@ let fromRetry = {}; // Track retry status per host
 function startServer() {
 
     // Start the ZKTeco HTTP ADMS Server
-    // startAttendanceServer();
+    if(process.env.DEVICE_ATTENDANCE == 'true'){
+        console.log("starting the device attendance");
+        startAttendanceServer(HTTP_PORT, HOST);
+    }
 
     function initServerConnection(SERVER_HOST){
         const socket = new net.Socket();
