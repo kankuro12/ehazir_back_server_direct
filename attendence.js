@@ -129,5 +129,6 @@ function startAttendanceServer(p,h) {
 }
 
 
-module.exports = {startAttendanceServer};
+// module.exports = {startAttendanceServer};
 
+startAttendanceServer(port, host);
