@@ -5,7 +5,7 @@ const axios = require("axios");
 
 const app = express();
 const host = "0.0.0.0";
-const port = 3000;
+const port = 4000;
 
 const BUFFER_TIME = process.env.BUFFER_TIME  * 60 * 1000; 
 console.log('Using BUFFER_TIME (ms):', BUFFER_TIME);
@@ -129,6 +129,6 @@ function startAttendanceServer(p,h) {
 }
 
 
-// module.exports = {startAttendanceServer};
+module.exports = {startAttendanceServer};
 
-startAttendanceServer(port, host);
+// startAttendanceServer(port, host);

@@ -1,7 +1,7 @@
 const http = require("http");
 
 const TARGET_HOST = "localhost";
-const TARGET_PORT = 3000;
+const TARGET_PORT = 4000;
 const TARGET_PATH = "/iclock/cdata";
 
 function generateMockAttendance() {
