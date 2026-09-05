@@ -142,7 +142,7 @@ function syncDataWithServer() {
     syncing = true;
     //get unsynced data from the database
     const sql = `SELECT id, date, time, rfid FROM attendance WHERE isSynced = 0`;
-    const remoteURL = `${MAIN_PROTOCOL}://${MAIN_DOMAIN}/api/device/set`;
+    const remoteURL = `${MAIN_PROTOCOL}://${MAIN_DOMAIN}/api/device/save-attendance`;
 
     db.all(sql, [], (err, rows) => {
         if (err) {
@@ -288,11 +288,6 @@ function startServer() {
             pendingRows.push({ date: currentDate, time: currentTime, rfid: processedHex });
         });
 
-        socket.on('timeout', () => {
-            console.log(`Connection timeout for ${SERVER_HOST}`);
-            socket.destroy();
-        });
-
         socket.on('error', (err) => {
             console.error(`Socket error for ${SERVER_HOST}:`, err.message);
             // Don't reconnect here - let close event handle it
@@ -310,7 +305,6 @@ function startServer() {
         });
 
         socket.connect(SERVER_PORT, SERVER_HOST, () => {
-            socket.setTimeout(10000); // 10 second timeout
             const packet = buildInitCommand();
             console.log(`Sending init command to ${SERVER_HOST}:`, packet.toString('hex'));
             socket.write(packet);
