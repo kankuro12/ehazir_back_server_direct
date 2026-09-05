@@ -1,68 +1,23 @@
+require('dotenv').config();
 const http = require("http");
 const express = require("express");
-const sqlite3 = require('sqlite3').verbose();
+const axios = require("axios");
 
 const app = express();
 const host = "0.0.0.0";
-const port = 3000;
+const port = 4000;
 
-const DEVICE_UPDATE_TIME = 30; // in seconds
-const BATCH_INTERVAL_MS = 1000;
+const BUFFER_TIME = process.env.BUFFER_TIME  * 60 * 1000; 
+console.log('Using BUFFER_TIME (ms):', BUFFER_TIME);
+const BATCH_INTERVAL_MS = 60000;
 
-// Initialize database
-const db = new sqlite3.Database('./attendance1.db', (err) => {
-    if (err) {
-        console.error('Could not open database:', err);
-        process.exit(1);
-    }
-});
-
-// Initialize attendance cache
 const attendanceCache = new Map();
-
-// Configure SQLite for better write concurrency
-db.run('PRAGMA journal_mode = WAL;');
-
-// Create table and prepare statements
-db.serialize(() => {
-    // Create the table if it doesn't exist
-    db.run(`
-    CREATE TABLE IF NOT EXISTS attendance (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      date TEXT NOT NULL,
-      rfid TEXT NOT NULL CHECK (length(rfid) = 24),
-      intime TEXT NOT NULL,
-      outtime TEXT,
-      isSynced INTEGER DEFAULT 0,
-      UNIQUE(date, rfid)
-    )
-  `, (err) => {
-        if (err) {
-            console.error('Table creation error:', err);
-            process.exit(1);
-        }
-        console.log('✅ Database table ready');
-    });
-});
-
-// Prepare statements for insertion and update
-const insertStmt = db.prepare(`
-  INSERT OR IGNORE INTO attendance (date, rfid, intime, outtime)
-  VALUES (?, ?, ?, ?)
-`);
-const updateStmt = db.prepare(`
-  UPDATE attendance SET outtime = ?, isSynced = 0
-  WHERE date = ? AND rfid = ?
-`);
 
 app.use((req, res, next) => {
     let data = "";
     req.setEncoding("utf8");
 
-    req.on("data", chunk => {
-        data += chunk;
-    });
-
+    req.on("data", chunk => (data += chunk));
     req.on("end", () => {
         req.rawBody = data;
         next();
@@ -70,32 +25,24 @@ app.use((req, res, next) => {
 });
 
 app.all("/iclock/getrequest", (req, res) => {
-    console.log("📡 getrequest:", req.query);
     res.send("OK");
 });
 
 app.all("/iclock/registry", (req, res) => {
-    console.log("📝 registry:", req.rawBody || req.query);
     res.send("OK");
 });
 
 app.all("/iclock/cdata", (req, res) => {
-    console.log("📥 RAW ATTENDANCE DATA:", req.rawBody);
-
     const records = parseAttendance(req.rawBody);
-    console.log("✅ PARSED RECORDS:", records);
 
-    // Save each record to the database
-    records.forEach(record => {
-        saveAttendanceRecord(record);
-    });
+    records.forEach(cacheAttendance);
 
     res.send("OK");
 });
 
 function parseAttendance(raw) {
     if (!raw) return [];
-    
+
     return raw
         .trim()
         .split("\n")
@@ -103,96 +50,85 @@ function parseAttendance(raw) {
         .map(line => {
             const cols = line.split("\t");
             return {
-                userId: cols[0],        // Column 1: User PIN/ID
-                punchTime: cols[1],     // Column 2: Punch DateTime
-                verifyMode: cols[2],    // Column 3: Verify Mode
-                inOutMode: cols[3],     // Column 4: In/Out Mode (1=in, 2=out)
-                workCode: cols[4]       // Column 5: Work Code
+                userId: cols[0],
+                punchTime: cols[1],
+                inOutMode: cols[2],
+                verifyMode: cols[3],
             };
         });
 }
 
-function saveAttendanceRecord(record) {
-    const userId = record.userId;
-    const punchDateTime = record.punchTime; // e.g., "2026-01-04 18:55:46"
-    const [currentDate, currentTime] = punchDateTime.split(" ");
+function cacheAttendance(record) {
+    const now = Date.now();
+    const key = record.userId;
 
-    // Convert userId to 24-character RFID format (pad with leading zeros)
-    const rfid = userId.padStart(24, '0');
+    const cached = attendanceCache.get(key);
 
-    // Check if record exists in cache
-    if (attendanceCache.has(rfid)) {
-        const cachedRecord = attendanceCache.get(rfid);
-        
-        // If the date has changed, clear the cache
-        if (cachedRecord.date !== currentDate) {
-            attendanceCache.clear();
-        } else {
-            // Check if enough time has passed since last update
-            const lastOutTime = new Date(`${cachedRecord.date} ${cachedRecord.outtime}`);
-            const currentOutTime = new Date(punchDateTime);
-            const timeDiff = (currentOutTime - lastOutTime) / 1000; // in seconds
-            
-            if (timeDiff > DEVICE_UPDATE_TIME) {
-                cachedRecord.outtime = currentTime;
-                cachedRecord.updated = true;
-            }
-            return;
+    if (cached && now - cached.timestamp < BUFFER_TIME) {
+        console.log(`Duplicate ignored for user ${record.userId} within ${(now - cached.timestamp) / 1000}s`);
+        return;
+    }
+
+    attendanceCache.set(key, {
+        record,
+        timestamp: now,
+        sent: false, // Track if this record has been sent
+    });
+    console.log(`Cached attendance for user ${record.userId}`);
+}
+
+async function flushAttendanceCache() {
+    const now = Date.now();
+
+    // Only get records that haven't been sent yet
+    const unsent = [];
+    for (const [key, value] of attendanceCache.entries()) {
+        if (!value.sent) {
+            unsent.push(value.record);
         }
     }
 
-    attendanceCache.set(rfid, {
-        date: currentDate,
-        intime: currentTime,
-        outtime: currentTime,
-        isNew: true,
-        updated: false
-    });
+    // If there are unsent records, send them
+    if (unsent.length > 0) {
+        console.log('payload', unsent);
 
-    console.log(`📝 Saved attendance for User ${userId} at ${punchDateTime}`);
-}
+        try {
+            await axios.post(
+                "http://localhost:8000/api/staff/attendance",
+                { records: unsent },
+                { timeout: 5000 }
+            );
 
-function flushCache() {
-    if (attendanceCache.size === 0) return;
-
-    let size = 0;
-
-    db.serialize(() => {
-        db.run('BEGIN TRANSACTION');
-        attendanceCache.forEach((record, rfid) => {
-            if (record.isNew) {
-                insertStmt.run(record.date, rfid, record.intime, record.outtime, (err) => {
-                    if (err) console.error(`Insert error for ${rfid}:`, err);
-                });
-                size++;
-            } else if (record.updated) {
-                updateStmt.run(record.outtime, record.date, rfid, (err) => {
-                    if (err) console.error(`Update error for ${rfid}:`, err);
-                });
-                size++;
+            // Mark records as sent
+            for (const [key, value] of attendanceCache.entries()) {
+                if (!value.sent) {
+                    value.sent = true;
+                }
             }
-            // Reset flags after flushing
-            record.isNew = false;
-            record.updated = false;
-        });
-        db.run('COMMIT');
-    });
+        } catch (error) {
+            console.error(
+                "❌ Backend error:",
+                error.response?.data || error.message
+            );
+        }
+    }
 
-    if (size > 0) {
-        console.log(`💾 Flushed ${size} records to the database.`);
+    for (const [key, value] of attendanceCache.entries()) {
+        if (now - value.timestamp >= BUFFER_TIME) {
+            attendanceCache.delete(key);
+        }
     }
 }
 
-// Periodically flush the cache
-setInterval(flushCache, BATCH_INTERVAL_MS);
+setInterval(flushAttendanceCache, BATCH_INTERVAL_MS);
 
-function startAttendanceServer() {
-
-    http.createServer(app).listen(port, host, () => {
-        console.log(`🟢 ZKTeco HTTP ADMS Server running on port ${port}`);
+function startAttendanceServer(p,h) {
+    http.createServer(app).listen(p, h, () => {
+        console.log(`🟢 ZKTeco HTTP ADMS Server running on port: ${p} and host: ${h}`);
     });
 }
 
-// module.exports = { startAttendanceServer };
-startAttendanceServer();
 
+module.exports = {startAttendanceServer};
+
+// startAttendanceServer(port, host);
