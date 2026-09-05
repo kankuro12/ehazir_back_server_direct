@@ -1,0 +1,303 @@
+require('dotenv').config();
+
+const net = require('net');
+const fs = require('fs');
+const path = require('path');
+const sqlite3 = require('sqlite3').verbose();
+const { default: axios } = require('axios');
+
+const LOGFILE = process.env.LOG_FILE || path.join(__dirname, 'server.log');
+
+function writeLog(line) {
+    fs.appendFile(LOGFILE, `${new Date().toISOString()} ${line}\n`, (err) => {
+        if (err) origError('Failed to write log:', err);
+    });
+}
+
+const origLog = console.log;
+const origError = console.error;
+console.log = (...args) => writeLog(args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '));
+console.error = (...args) => writeLog(`ERROR ${args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')}`);
+
+const PORT = process.env.SERVER_LISTEN_PORT || 5000;
+
+const MAIN_DOMAIN = process.env.MAIN_DOMAIN || 'localhost:8000';
+const MAIN_PROTOCOL = process.env.MAIN_PROTOCOL || 'http';
+const LOCAL_TOKEN = process.env.LOCAL_TOKEN || 'your_local_token';
+const DEVICE_ID = process.env.DEVICE_ID || 'your_device_id';
+const DEVICE_UPDATE_TIME = process.env.DEVICE_UPDATE_TIME || 30; // in seconds
+
+const debugMode = process.argv.includes('--debug');
+
+const db = new sqlite3.Database('./attendance1.db', (err) => {
+    if (err) {
+        console.error('Could not open database:', err);
+        process.exit(1);
+    }
+});
+
+var lastData = '';
+var syncing = false;
+var syncTimeOut;
+
+db.run('PRAGMA journal_mode = WAL;');
+
+db.serialize(() => {
+    db.run(`
+    CREATE TABLE IF NOT EXISTS attendance (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,         -- Format: 'YYYY-MM-DD'
+      rfid TEXT NOT NULL CHECK (length(rfid) = 24),
+      intime TEXT NOT NULL,       -- First time the RFID is read
+      outtime TEXT,               -- Last time the RFID is read
+      isSynced INTEGER DEFAULT 0, -- 0 = not synced, 1 = synced
+      UNIQUE(date, rfid)
+    )
+  `, (err) => {
+        if (err) {
+            console.error('Table creation error:', err);
+            process.exit(1);
+        }
+
+        startServer();
+    });
+});
+
+const attendanceCache = new Map();
+
+function loadAttendanceCache() {
+    return new Promise((resolve, reject) => {
+        const sql = `SELECT date, rfid, intime, outtime, isSynced FROM attendance WHERE date = ?`;
+        const today = new Date().toISOString().split('T')[0];
+
+        db.all(sql, [today], (err, rows) => {
+            if (err) {
+                console.error('Error loading attendance cache:', err);
+                reject(err);
+            } else {
+                console.log('Attendance cache loaded successfully.');
+                rows.forEach(row => {
+                    attendanceCache.set(row.rfid, {
+                        date: row.date,
+                        intime: row.intime,
+                        outtime: row.outtime,
+                        isNew: false,
+                        updated: false
+                    });
+                });
+                resolve();
+            }
+        });
+    });
+}
+
+const BATCH_INTERVAL_MS = 1000;
+
+const insertStmt = db.prepare(`
+  INSERT OR IGNORE INTO attendance (date, rfid, intime, outtime)
+  VALUES (?, ?, ?, ?)
+`);
+const updateStmt = db.prepare(`
+  UPDATE attendance SET outtime = ?,isSynced = 0
+  WHERE date = ? AND rfid = ?
+`);
+
+function flushCache() {
+    if (attendanceCache.size === 0) return;
+
+    let size = 0;
+
+    db.serialize(() => {
+        db.run('BEGIN TRANSACTION');
+        attendanceCache.forEach((record, rfid) => {
+            if (record.isNew) {
+                insertStmt.run(record.date, rfid, record.intime, record.outtime, (err) => {
+                    if (err) console.error(`Insert error for ${rfid}:`, err);
+                });
+                size++;
+
+            } else if (record.updated) {
+                updateStmt.run(record.outtime, record.date, rfid, (err) => {
+                    if (err) console.error(`Update error for ${rfid}:`, err);
+                });
+                size++;
+            }
+            record.isNew = false;
+            record.updated = false;
+        });
+        db.run('COMMIT');
+        if (!syncing) {
+            if (syncTimeOut) {
+                clearTimeout(syncTimeOut);
+                syncTimeOut = null;
+            }
+            syncDataWithServer();
+        }
+    });
+    if (size > 0 || debugMode) {
+        console.log(`Flushed ${size} records to the database.`);
+    }
+}
+
+function syncDataWithServer() {
+    if (syncing) return;
+    syncing = true;
+    const sql = `SELECT id, date, rfid, intime, outtime FROM attendance WHERE isSynced = 0`;
+    const remoteURL = `${MAIN_PROTOCOL}://${MAIN_DOMAIN}/api/device/set`;
+
+    db.all(sql, [], (err, rows) => {
+        if (err) {
+            console.error('Error syncing data with server:', err.message);
+            syncing = false;
+            syncTimeOut = setTimeout(syncDataWithServer, 30000);
+            return;
+        }
+        const datas = rows.map(row => ({
+            id: row.id,
+            date: row.date,
+            rfid: row.rfid,
+            in_time: row.intime,
+            out_time: row.outtime,
+        }));
+
+        const ids = datas.map(data => data.id);
+        if (ids.length === 0) {
+            syncing = false;
+            syncTimeOut = setTimeout(syncDataWithServer, 30000);
+            return;
+        }
+        if (debugMode) {
+            console.log('Synchronizing data with server...');
+        }
+        axios.post(remoteURL, {
+            token: LOCAL_TOKEN,
+            device_id: DEVICE_ID,
+            datas: datas.map(data => ({
+                rfid: data.rfid,
+                in_time: data.in_time,
+                out_time: data.out_time,
+                date: data.date
+            }))
+        })
+            .then((res) => {
+                if (res.status === 200 && ids.length > 0) {
+                    db.serialize(() => {
+                        const stmt = db.prepare(`UPDATE attendance SET isSynced = 1 WHERE id IN (${ids.join(',')})`);
+                        stmt.run();
+                        stmt.finalize();
+                    });
+                    if (debugMode) {
+                        console.log(res.data);
+                    }
+                }
+            })
+            .catch((error) => {
+                console.log(error.response ? error.response.data : error.message);
+                console.error('Error syncing data with server:', error.message);
+            })
+            .finally(() => {
+                syncing = false;
+                syncTimeOut = setTimeout(syncDataWithServer, 30000);
+            });
+    });
+}
+
+setInterval(flushCache, BATCH_INTERVAL_MS);
+
+function getCurrentDataTime() {
+    const now = new Date();
+
+    const hours = now.getHours().toString().padStart(2, '0');
+    const minutes = now.getMinutes().toString().padStart(2, '0');
+    const seconds = now.getSeconds().toString().padStart(2, '0');
+
+    const formattedTime = `${hours}:${minutes}:${seconds}`;
+
+    const year = now.getFullYear();
+    const month = (now.getMonth() + 1).toString().padStart(2, '0');
+    const day = now.getDate().toString().padStart(2, '0');
+
+    const formattedDate = `${year}-${month}-${day}`;
+    return { currentDate: formattedDate, currentTime: formattedTime };
+}
+
+function processRFID(processedHex, peer) {
+    if (debugMode) {
+        console.log('Received hex string:', peer, processedHex);
+    }
+
+    lastData = processedHex;
+
+    const { currentDate, currentTime } = getCurrentDataTime();
+
+    if (attendanceCache.has(processedHex)) {
+        const record = attendanceCache.get(processedHex);
+        if (record.date !== currentDate) {
+            attendanceCache.clear();
+        } else {
+            const lastOutTime = new Date(`${record.date} ${record.outtime}`);
+            const currentOutTime = new Date(`${currentDate} ${currentTime}`);
+            const timeDiff = (currentOutTime - lastOutTime) / 1000; // in seconds
+            if (timeDiff > DEVICE_UPDATE_TIME) {
+                record.outtime = currentTime;
+                record.updated = true;
+            }
+            return;
+        }
+    }
+
+    attendanceCache.set(processedHex, {
+        date: currentDate,
+        intime: currentTime,
+        outtime: currentTime,
+        isNew: true,
+        updated: false
+    });
+}
+
+function startServer() {
+    const server = net.createServer((socket) => {
+        const peer = `${socket.remoteAddress}:${socket.remotePort}`;
+        console.log(`Client connected: ${peer}`);
+
+        socket.on('data', (data) => {
+            const hexMessage = data.toString('hex');
+            const processedHex = hexMessage.slice(0, -4).slice(-24);
+            processRFID(processedHex, peer);
+        });
+
+        socket.on('end', () => {
+            console.log(`Client disconnected: ${peer}`);
+        });
+
+        socket.on('error', (err) => {
+            console.error(`Socket error from ${peer}:`, err);
+        });
+    });
+
+    server.on('error', (err) => {
+        console.error('Server error:', err);
+    });
+
+    server.listen(PORT, () => {
+        console.log(`TCP listener running on port ${PORT}`);
+    });
+
+    loadAttendanceCache()
+        .catch((err) => {
+            console.error('Error loading attendance cache:', err);
+            process.exit(1);
+        });
+
+    process.on('SIGINT', () => {
+        // save last data to a file
+        fs.writeFileSync('lastData.txt', lastData);
+        console.log('\nShutting down...');
+        flushCache();
+        insertStmt.finalize();
+        updateStmt.finalize();
+        db.close();
+        server.close(() => process.exit(0));
+        setTimeout(() => process.exit(0), 3000);
+    });
+}

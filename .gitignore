@@ -19,3 +19,4 @@ dist/
 lastdata.txt
 rfid.txt
 tokens.csv
+emulator_rfids.txt

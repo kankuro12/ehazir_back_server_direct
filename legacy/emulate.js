@@ -22,6 +22,27 @@ function broadcastToClients(data) {
     });
 }
 
+function randomInt(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function getRandomRfid() {
+    return Array.from(rfids)[Math.floor(Math.random() * rfids.size)];
+}
+
+function scheduleBurst() {
+    const burstSize = Math.random() < 0.5 ? 4 : 5;
+
+    for (let index = 0; index < burstSize; index++) {
+        broadcastToClients(getRandomRfid());
+    }
+
+    const pauseMs = randomInt(10 * 1000,  60 * 1000);
+    console.log(`Next burst in ${Math.round(pauseMs / 1000)} seconds`);
+
+    setTimeout(scheduleBurst, pauseMs);
+}
+
 var rfids = new Set(); // Set to store unique RFID values
 
 const rfidFile = path.join(__dirname, 'rfid.txt');
@@ -67,12 +88,8 @@ const server = net.createServer((socket) => {
     });
 });
 
-//broadcast to clients on 1 second
-setInterval(() => {
-    const data = Array.from(rfids)[Math.floor(Math.random() * rfids.size)];
-    // console.log(`Broadcasting: ${data}`);
-    broadcastToClients(data);
-}, 10);
+// broadcast in bursts of 4-5 values, then pause for 2-3 minutes
+setTimeout(scheduleBurst, 1000);
 
 // start TCP server
 server.listen(2022, () => {
